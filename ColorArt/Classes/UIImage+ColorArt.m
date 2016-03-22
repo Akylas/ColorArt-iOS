@@ -11,7 +11,7 @@
 @implementation UIImage (ColorArt)
 
 - (SLColorArt *)colorArt:(CGSize)scale{
-    return [[SLColorArt alloc] initWithImage:[self scaledToSize: scale]];
+    return [[[SLColorArt alloc] initWithImage:[self scaledToSize: scale]] autorelease];
 }
 
 - (SLColorArt *)colorArt{
