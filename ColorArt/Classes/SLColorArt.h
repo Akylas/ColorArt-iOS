@@ -22,10 +22,12 @@
 @property(strong, nonatomic, readonly) UIColor *primaryColor;
 @property(strong, nonatomic, readonly) UIColor *secondaryColor;
 @property(strong, nonatomic, readonly) UIColor *detailColor;
-@property(nonatomic, readonly) NSInteger randomColorThreshold; // Default to 2
+@property(nonatomic, readonly) CGFloat randomColorThreshold; // Default to 0.01
+@property(nonatomic, readonly) UIImage *image;
 
 - (id)initWithImage:(UIImage*)image;
-- (id)initWithImage:(UIImage*)image threshold:(NSInteger)threshold;
+- (id)initWithImage:(UIImage*)image threshold:(CGFloat)threshold;
+- (id)initWithImage:(UIImage*)image scaleSize:(CGSize)scaleSize;
 
 + (void)processImage:(UIImage *)image
         scaledToSize:(CGSize)scaleSize

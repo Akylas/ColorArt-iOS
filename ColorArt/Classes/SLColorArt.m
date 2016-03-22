@@ -22,6 +22,11 @@
 #define kAnalyzedSecondaryColor @"kAnalyzedSecondaryColor"
 #define kAnalyzedDetailColor @"kAnalyzedDetailColor"
 
+#import "TiUtils.h"
+
+#define EDGE_COLOR_DISCARD_THRESHOLD 0.3
+#define MINIMUM_SATURATION_THRESHOLD 0.15
+#define MINIMUM_CONTRAST_THRESHOLD 1.4
 
 
 @interface UIColor (DarkAddition)
@@ -50,21 +55,24 @@
 @property(nonatomic,readwrite,strong) UIColor *primaryColor;
 @property(nonatomic,readwrite,strong) UIColor *secondaryColor;
 @property(nonatomic,readwrite,strong) UIColor *detailColor;
-@property(nonatomic,readwrite) NSInteger randomColorThreshold;
+@property(nonatomic,readwrite) CGFloat randomColorThreshold;
 @end
 
 @implementation SLColorArt
+{
+    int realThreshold;
+}
 
 - (id)initWithImage:(UIImage*)image
 {
-    self = [self initWithImage:image threshold:2];
+    self = [self initWithImage:image threshold:0.01];
     if (self) {
 
     }
     return self;
 }
 
-- (id)initWithImage:(UIImage*)image threshold:(NSInteger)threshold;
+- (id)initWithImage:(UIImage*)image threshold:(CGFloat)threshold;
 {
     self = [super init];
 
@@ -76,6 +84,11 @@
     }
 
     return self;
+}
+
+- (id)initWithImage:(UIImage*)image scaleSize:(CGSize)scaleSize
+{
+    return [self initWithImage:[image scaledToSize:scaleSize] threshold:0.01];
 }
 
 
@@ -90,6 +103,7 @@
                                                        threshold:threshold];
         dispatch_async(dispatch_get_main_queue(), ^{
             completeBlock(colorArt);
+            [colorArt release];
         });
     });
     
@@ -112,40 +126,11 @@
 - (UIImage*)_scaleImage:(UIImage*)image size:(CGSize)scaledSize
 {
     return [image scaledToSize:scaledSize];
-//    CGSize imageSize = [image size];
-//    UIImage *squareImage = [[UIImage alloc] initWithSize:CGSizeMake(imageSize.width, imageSize.width)];
-//    UIImage *scaledImage = [[UIImage alloc] initWithSize:scaledSize];
-//    CGRect drawRect;
-//
-//    // make the image square
-//    if ( imageSize.height > imageSize.width )
-//    {
-//        drawRect = CGRectMake(0, imageSize.height - imageSize.width, imageSize.width, imageSize.width);
-//    }
-//    else
-//    {
-//        drawRect = CGRectMake(0, 0, imageSize.height, imageSize.height);
-//    }
-//
-//  //  [squareImage lockFocus];
-//    [image drawInRect:CGRectMake(0, 0, imageSize.width, imageSize.width)];
-//  //  [squareImage unlockFocus];
-//
-//    // scale the image to the desired size
-//
-//  //  [scaledImage lockFocus];
-//    [squareImage drawInRect:CGRectMake(0, 0, scaledSize.width, scaledSize.height)];
-//  //  [scaledImage unlockFocus];
-//
-//    // convert back to readable bitmap data
-//
-//    
-//    UIImage *finalImage = [[UIImage alloc] initWithCGImage:scaledImage.CGImage];
-//    return finalImage;
 }
 
 - (NSDictionary*)_analyzeImage:(UIImage*)anImage
 {
+    realThreshold = (int) (CGImageGetHeight(anImage.CGImage) * self.randomColorThreshold);
     NSCountedSet *imageColors = nil;
 	UIColor *backgroundColor = [self _findEdgeColor:anImage imageColors:&imageColors];
 	UIColor *primaryColor = nil;
@@ -165,7 +150,6 @@
 
 	if ( primaryColor == nil )
 	{
-		NSLog(@"missed primary");
 		if ( darkBackground )
 			primaryColor = [UIColor whiteColor];
 		else
@@ -174,7 +158,6 @@
 
 	if ( secondaryColor == nil )
 	{
-		NSLog(@"missed secondary");
 		if ( darkBackground )
 			secondaryColor = [UIColor whiteColor];
 		else
@@ -183,7 +166,6 @@
 
 	if ( detailColor == nil )
 	{
-		NSLog(@"missed detail");
 		if ( darkBackground )
 			detailColor = [UIColor whiteColor];
 		else
@@ -197,7 +179,7 @@
     [dict setObject:detailColor forKey:kAnalyzedDetailColor];
 
 
-    return [NSDictionary dictionaryWithDictionary:dict];
+    return [NSDictionary dictionaryWithDictionary:[dict autorelease]];
 }
 
 typedef struct RGBAPixel
@@ -209,6 +191,21 @@ typedef struct RGBAPixel
     
 } RGBAPixel;
 
+
+- (NSString *)hexStringFromColor:(UIColor *)color
+{
+    const CGFloat *components = CGColorGetComponents(color.CGColor);
+    
+    CGFloat r = components[0];
+    CGFloat g = components[1];
+    CGFloat b = components[2];
+    
+    return [NSString stringWithFormat:@"%02lX%02lX%02lX",
+            lroundf(r * 255),
+            lroundf(g * 255),
+            lroundf(b * 255)];
+}
+
 - (UIColor*)_findEdgeColor:(UIImage*)image imageColors:(NSCountedSet**)colors
 {
 	CGImageRef imageRep = image.CGImage;
@@ -219,7 +216,8 @@ typedef struct RGBAPixel
 	NSInteger height = CGImageGetHeight(imageRep); //[imageRep pixelsHigh];
 
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
-    CGContextRef bmContext = CGBitmapContextCreate(NULL, width, height, 8, 4 * width, cs, kCGImageAlphaNoneSkipLast);
+    CGContextRef bmContext = CGBitmapContextCreate(NULL, width, height, 8, 4 * width, cs, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
+    CGContextSetBlendMode(bmContext, kCGBlendModeCopy);
     CGContextDrawImage(bmContext, (CGRect){.origin.x = 0.0f, .origin.y = 0.0f, .size.width = width, .size.height = height}, image.CGImage);
     CGColorSpaceRelease(cs);
     NSCountedSet* imageColors = [[NSCountedSet alloc] initWithCapacity:width * height];
@@ -231,10 +229,11 @@ typedef struct RGBAPixel
         {
             const NSUInteger index = x + y * width;
             RGBAPixel pixel = pixels[index];
-            UIColor* color = [[UIColor alloc] initWithRed:((CGFloat)pixel.red / 255.0f) green:((CGFloat)pixel.green / 255.0f) blue:((CGFloat)pixel.blue / 255.0f) alpha:1.0f];
-            if (0 == x)
+            UIColor* color = [[UIColor alloc] initWithRed:((CGFloat)pixel.red / 255.0f) green:((CGFloat)pixel.green / 255.0f) blue:((CGFloat)pixel.blue / 255.0f) alpha:((CGFloat)pixel.alpha / 255.0f)];
+            if (0 == x || y == 0)
                 [edgeColors addObject:color];
             [imageColors addObject:color];
+            [color release];
         }
     }
     CGContextRelease(bmContext);
@@ -250,15 +249,12 @@ typedef struct RGBAPixel
 	while ( (curColor = [enumerator nextObject]) != nil )
 	{
 		NSUInteger colorCount = [edgeColors countForObject:curColor];
-
-		if ( colorCount <= self.randomColorThreshold ) // prevent using random colors, threshold should be based on input image size
+		if ( colorCount <= realThreshold ) // prevent using random colors
 			continue;
-
-		PCCountedColor *container = [[PCCountedColor alloc] initWithColor:curColor count:colorCount];
-
-		[sortedColors addObject:container];
+		[sortedColors addObject:[[[PCCountedColor alloc] initWithColor:curColor count:colorCount] autorelease]];
 	}
-
+    [edgeColors release];
+    edgeColors = nil;
 	[sortedColors sortUsingSelector:@selector(compare:)];
 
 
@@ -274,7 +270,7 @@ typedef struct RGBAPixel
 			{
 				PCCountedColor *nextProposedColor = [sortedColors objectAtIndex:i];
 
-				if (((double)nextProposedColor.count / (double)proposedEdgeColor.count) > .4 ) // make sure the second choice color is 40% as common as the first choice
+				if (((double)nextProposedColor.count / (double)proposedEdgeColor.count) > EDGE_COLOR_DISCARD_THRESHOLD ) // make sure the second choice color is 40% as common as the first choice
 				{
 					if ( ![nextProposedColor.color pc_isBlackOrWhite] )
 					{
@@ -304,18 +300,15 @@ typedef struct RGBAPixel
 
 	while ( (curColor = [enumerator nextObject]) != nil )
 	{
-		curColor = [curColor pc_colorWithMinimumSaturation:.15];
+        NSUInteger colorCount = [colors countForObject:curColor];
+        
+        if ( colorCount <= realThreshold ) // prevent using random colors
+            continue;
+		curColor = [curColor pc_colorWithMinimumSaturation:MINIMUM_SATURATION_THRESHOLD];
 
 		if ( [curColor pc_isDarkColor] == findDarkTextColor )
 		{
-			NSUInteger colorCount = [colors countForObject:curColor];
-
-			//if ( colorCount <= 2 ) // prevent using random colors, threshold should be based on input image size
-			//	continue;
-
-			PCCountedColor *container = [[PCCountedColor alloc] initWithColor:curColor count:colorCount];
-
-			[sortedColors addObject:container];
+			[sortedColors addObject:[[[PCCountedColor alloc] initWithColor:curColor count:colorCount] autorelease]];
 		}
 	}
 
@@ -324,7 +317,7 @@ typedef struct RGBAPixel
 	for ( PCCountedColor *curContainer in sortedColors )
 	{
 		curColor = curContainer.color;
-
+//        NSLog(@"%@, %d", [TiUtils colorHexString:curColor], curContainer.count)
 		if ( *primaryColor == nil )
 		{
 			if ( [curColor pc_isContrastingColor:backgroundColor] )
@@ -471,7 +464,7 @@ typedef struct RGBAPixel
 			contrast = (fLum + 0.05) / (bLum + 0.05);
 
 		//return contrast > 3.0; //3-4.5
-		return contrast > 1.6;
+		return contrast > MINIMUM_CONTRAST_THRESHOLD;
 	}
 
 	return YES;
