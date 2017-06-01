@@ -63,6 +63,11 @@
     int realThreshold;
 }
 
+- (void)dealloc {
+    [_backgroundColor release], _backgroundColor = nil;
+    [super dealloc];
+}
+
 - (id)initWithImage:(UIImage*)image
 {
     self = [self initWithImage:image threshold:0.01];
@@ -475,6 +480,12 @@ typedef struct RGBAPixel
 
 
 @implementation PCCountedColor
+
+- (void)dealloc {
+    [_color release], _color = nil;
+    [super dealloc];
+}
+
 
 - (id)initWithColor:(UIColor*)color count:(NSUInteger)count
 {
